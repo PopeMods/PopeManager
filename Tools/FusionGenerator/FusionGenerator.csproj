@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Reference the exact managed generators shipped inside the selected host APK. -->
+    <Reference Include="lib/*.dll"><Private>true</Private></Reference>
+  </ItemGroup>
+  <Target Name="CheckFusionLibraries" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('lib/Cpp2IL.Core.dll')" Text="Run Prepare-Fusion.ps1 to extract the host's generation libraries first." />
+  </Target>
+</Project>

@@ -1,0 +1,55 @@
+# .NET and IDE output
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+TestResults/
+*.coverage
+*.coveragexml
+
+# Local tests, device backups, and diagnostics
+.test-data/
+.ui-smoke/
+/device-backups/
+/diagnostics/
+*.log
+*.dmp
+
+# Generated runtime references and Android build tools
+/tools/fusion-generator/
+/Tools/FusionGenerator/lib/
+/tools/android-build-tools/
+/sessions/
+/libraries/
+
+# Game packages, expansion data, and extracted metadata
+*.apk
+*.apks
+*.aab
+*.obb
+global-metadata.dat
+
+# Signing keys, including timestamped backups
+/signing/
+*.jks
+*.jks.*
+*.keystore
+*.keystore.*
+*.p12
+*.pfx
+*.pfx.*
+
+# Local environment configuration
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
