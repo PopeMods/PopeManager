@@ -11,18 +11,12 @@ TestResults/
 *.coverage
 *.coveragexml
 
-# Local tests, device backups, and diagnostics
-.test-data/
-.ui-smoke/
+# device backups and diagnostics
 /device-backups/
 /diagnostics/
 *.log
 *.dmp
 
-# Generated runtime references and Android build tools
-/tools/fusion-generator/
-/Tools/FusionGenerator/lib/
-/tools/android-build-tools/
 /sessions/
 /libraries/
 
