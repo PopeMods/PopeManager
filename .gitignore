@@ -28,6 +28,7 @@ TestResults/
 
 # Game packages, expansion data, and extracted metadata
 *.apk
+!/loader/FusionCore-Quest.apk
 *.apks
 *.aab
 *.obb
