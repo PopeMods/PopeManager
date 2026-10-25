@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 
 namespace PopeManager;
@@ -6,16 +7,43 @@ internal record Headset(string Serial, string Name, string State, bool IsQuest, 
 
 internal class AdbManager(ICommandRunner runner, string? executableOverride = null)
 {
-    internal string Executable
+    string? executable;
+
+    internal string Executable => executable ??= ResolveExecutable();
+
+    string ResolveExecutable()
     {
-        get
+        if (executableOverride != null) { EnsureExecutable(executableOverride); return executableOverride; }
+        string? bundled = BundledExecutable();
+        if (bundled != null) { EnsureExecutable(bundled); return bundled; }
+        string found = AppPaths.FindTool("adb");
+        EnsureExecutable(found);
+        return found;
+    }
+
+    static string? BundledExecutable()
+    {
+        if (OperatingSystem.IsWindows())
         {
-            if (executableOverride != null) return executableOverride;
-            string folder = OperatingSystem.IsWindows() ? "adb" : "adb-linux";
-            string file = OperatingSystem.IsWindows() ? "adb.exe" : "adb";
-            var bundled = Path.Combine(AppContext.BaseDirectory, folder, file);
-            return File.Exists(bundled) ? bundled : AppPaths.FindTool("adb");
+            string windows = Path.Combine(AppContext.BaseDirectory, "adb", "adb.exe");
+            return File.Exists(windows) ? windows : null;
         }
+        if (!OperatingSystem.IsLinux() || RuntimeInformation.OSArchitecture != Architecture.X64) return null;
+        string linux = Path.Combine(AppContext.BaseDirectory, "adb-linux", "adb");
+        return File.Exists(linux) ? linux : null;
+    }
+
+    /// <summary>Archive extraction and some publish steps drop the executable bit on Unix.</summary>
+    internal static void EnsureExecutable(string path)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        try
+        {
+            const UnixFileMode execute = UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+            UnixFileMode mode = File.GetUnixFileMode(path);
+            if ((mode & execute) != execute) File.SetUnixFileMode(path, mode | execute);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or NotSupportedException) { }
     }
     internal Task<CommandResult> Run(string serial, IEnumerable<string> args, CancellationToken token,
         Action<string>? log = null, bool check = true) => runner.RunAsync(Executable, new[] { "-s", serial }.Concat(args), token, log, check);
@@ -24,14 +52,27 @@ internal class AdbManager(ICommandRunner runner, string? executableOverride = nu
         Run(serial, ["shell", string.Join(" ", args.Select(Quote))], token, check: check);
 
     internal static List<(string Serial, string State)> ParseDevices(string output) => output.Split('\n')
-        .Select(line => line.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-        .Where(parts => parts.Length >= 2 && parts[0] != "List" && parts[0] != "*"
-            && parts[1] is "device" or "offline" or "unauthorized" or "recovery" or "sideload")
-        .Select(parts => (parts[0], parts[1])).ToList();
+        .Select(line => line.Trim())
+        .Where(line => line.Length > 0 && !line.StartsWith("List of devices", StringComparison.Ordinal) && !line.StartsWith('*'))
+        .Select(line =>
+        {
+            var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            string state = parts.Length >= 2 && parts[1] == "no" && line.Contains("no permissions", StringComparison.Ordinal)
+                ? "no permissions"
+                : parts.Length >= 2 ? parts[1] : "";
+            return (parts[0], state);
+        })
+        .Where(device => device.Item2 is "device" or "offline" or "unauthorized" or "recovery" or "sideload" or "no permissions")
+        .ToList();
 
     internal async Task<List<Headset>> Detect(CancellationToken token)
     {
-        var result = await runner.RunAsync(Executable, ["devices", "-l"], token);
+        CommandResult result;
+        try { result = await runner.RunAsync(Executable, ["devices", "-l"], token); }
+        catch (System.ComponentModel.Win32Exception e)
+        {
+            throw new IOException($"Could not start ADB at \"{Executable}\". {e.Message}", e);
+        }
         var list = new List<Headset>();
         foreach (var (serial, state) in ParseDevices(result.Output))
         {

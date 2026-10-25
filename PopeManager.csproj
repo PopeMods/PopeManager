@@ -48,4 +48,9 @@
     <Content Include="adb/**/*;adb-linux/**/*;tools/fusion-generator/**/*;tools/android-build-tools/**/*;loader/**/*;Templates/**/*;logo.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <Target Name="MakeBundledAdbExecutable" AfterTargets="Build;Publish" Condition="'$(OS)' != 'Windows_NT'">
+    <Exec Command="if [ -f &quot;$(OutDir)adb-linux/adb&quot; ]; then chmod +x &quot;$(OutDir)adb-linux/adb&quot;; fi" />
+    <Exec Command="if [ -f &quot;$(PublishDir)adb-linux/adb&quot; ]; then chmod +x &quot;$(PublishDir)adb-linux/adb&quot;; fi" />
+  </Target>
+
 </Project>

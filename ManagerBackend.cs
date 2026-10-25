@@ -70,6 +70,7 @@ public class ManagerBackend
                     {
                         var current = devices.FirstOrDefault(d => d.Serial == selected);
                         status = devices.Count == 0 ? "No headset detected. Connect your Quest via USB."
+                            : devices.Any(d => d.State == "no permissions") ? "Linux cannot access the headset. Install Android udev rules, then reconnect it."
                             : devices.Any(d => d.State == "unauthorized") ? "Put on your headset and allow USB debugging."
                             : ready.Count > 1 && selected.Length == 0 ? "Choose the headset you want to use."
                             : current is { Installed: true } && hostInstalled ? "Already patched."

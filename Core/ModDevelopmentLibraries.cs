@@ -9,6 +9,7 @@ namespace PopeManager;
 internal static class ModDevelopmentLibraries
 {
     static readonly object Gate = new();
+    const UnixFileMode ExecuteMode = UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
     internal static string Root => Path.Combine(AppPaths.Data, "libraries");
     internal static string PropsPath => Path.Combine(Root, "ModLibraries.props");
 
@@ -96,7 +97,9 @@ internal static class ModDevelopmentLibraries
             if (File.Exists(output) && FusionHost.Sha256(output) == FusionHost.Sha256(file)) continue;
             string pending = output + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.Copy(file, pending);
-            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(pending, File.GetUnixFileMode(file));
+            if (!OperatingSystem.IsWindows()
+                && (Path.GetFileName(file) == executable || (File.GetUnixFileMode(file) & ExecuteMode) != 0))
+                File.SetUnixFileMode(pending, File.GetUnixFileMode(file) | ExecuteMode);
             File.Move(pending, output, true);
         }
         UpdateProperty("AdbPath", Path.Combine(destination, executable));

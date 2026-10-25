@@ -22,6 +22,7 @@ ApplicationWindow {
     readonly property var headset: state.devices.find(function(device) { return device.serial === state.selected }) || null
     readonly property bool connected: !!headset && headset.state === "device" && headset.quest
     readonly property bool needsPermission: state.devices.some(function(device) { return device.state === "unauthorized" })
+    readonly property bool needsUsbAccess: state.devices.some(function(device) { return device.state === "no permissions" })
     readonly property var quests: state.devices.filter(function(device) { return device.state === "device" && device.quest })
 
     function poll() {
@@ -49,7 +50,8 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     font.pixelSize: 28
                     wrapMode: Text.Wrap
-                    text: window.needsPermission ? "Allow USB debugging" :
+                    text: window.needsUsbAccess ? "Grant USB access to your Quest" :
+                        window.needsPermission ? "Allow USB debugging" :
                         ["Plug in your headset", "Create an organization", "Enable developer mode", "Connect your headset"][window.guideStep]
                 }
                 Label {
@@ -57,22 +59,23 @@ ApplicationWindow {
                     wrapMode: Text.Wrap
                     lineHeight: 1.35
                     color: "#d0d0d0"
-                    text: window.needsPermission ? "Put on the headset and accept the USB debugging prompt." :
+                    text: window.needsUsbAccess ? "Linux is blocking access to the headset. Install the Android udev rules (or add your user to the plugdev group), then unplug and reconnect the headset." :
+                        window.needsPermission ? "Put on the headset and accept the USB debugging prompt." :
                         ["Connect your Quest with a USB cable to get started. If you need a hand, run through the connection guide.",
                          "Create an organization on the Meta Developer Hub. Sign in with the same account your headset uses.",
                          "In the Meta Horizon mobile app, go to Devices -> select your device -> Headset settings -> Developer mode, then turn it on.",
                          "Plug your headset into this PC with a USB cable. It should be detected automatically."][window.guideStep]
                 }
                 Button {
-                    visible: window.guideStep === 1 && !window.needsPermission
+                    visible: window.guideStep === 1 && !window.needsPermission && !window.needsUsbAccess
                     text: "Open Meta Developer Hub"
                     flat: true
                     onClicked: Qt.openUrlExternally("https://developers.meta.com/vr/manage/organizations")
                 }
                 RowLayout {
                     spacing: 12
-                    Button { visible: window.guideStep > 0 && !window.needsPermission; text: "Back"; flat: true; onClicked: window.guideStep-- }
-                    Button { visible: window.guideStep < 3 && !window.needsPermission; text: window.guideStep === 0 ? "Connection guide" : "Next"; highlighted: true; onClicked: window.guideStep++ }
+                    Button { visible: window.guideStep > 0 && !window.needsPermission && !window.needsUsbAccess; text: "Back"; flat: true; onClicked: window.guideStep-- }
+                    Button { visible: window.guideStep < 3 && !window.needsPermission && !window.needsUsbAccess; text: window.guideStep === 0 ? "Connection guide" : "Next"; highlighted: true; onClicked: window.guideStep++ }
                     Button { text: "Check connection"; flat: true; enabled: !window.state.scanning; onClicked: backend.refresh() }
                     BusyIndicator { running: window.state.scanning; visible: running; implicitWidth: 28; implicitHeight: 28 }
                 }

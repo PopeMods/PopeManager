@@ -2,9 +2,20 @@ namespace PopeManager;
 
 internal class ApkMaker(ICommandRunner runner)
 {
-    string Root => Path.Combine(AppContext.BaseDirectory, "tools", "android-build-tools", "android-14");
-    string ZipAlign => Path.Combine(Root, "zipalign.exe");
-    string ApkSigner => Path.Combine(Root, "apksigner.bat");
+    string Root => Path.Combine(
+        AppContext.BaseDirectory,
+        "tools",
+        "android-build-tools",
+        OperatingSystem.IsLinux() ? "android-14-linux" : "android-14");
+
+    string ZipAlign => Path.Combine(
+        Root,
+        OperatingSystem.IsWindows() ? "zipalign.exe" : "zipalign");
+
+    string ApkSigner => Path.Combine(
+        Root,
+        OperatingSystem.IsWindows() ? "apksigner.bat" : "apksigner");
+
     string KeyStore => Path.Combine(AppPaths.Data, "signing", "popemanager-gorillatag.jks");
     const string Alias = "popemanager";
     const string Password = "popenheimer";
@@ -12,13 +23,16 @@ internal class ApkMaker(ICommandRunner runner)
     internal void Validate()
     {
         if (!File.Exists(ZipAlign) || !File.Exists(ApkSigner))
-            throw new IOException("Android build tools are missing. reinstall popemanager");
+            throw new IOException(
+                $"Android build tools are missing for {System.Runtime.InteropServices.RuntimeInformation.OSDescription}. " +
+                $"Expected zipalign at '{ZipAlign}' and apksigner at '{ApkSigner}'.");
     }
 
     internal async Task PrepareSigningKey(CancellationToken token, Action<string> log)
     {
         Validate();
-        string keytool = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Eclipse Adoptium", "jdk-21.0.12.101-hotspot", "bin", "keytool.exe");
+        string keytool = AppPaths.FindTool(
+            OperatingSystem.IsWindows() ? "keytool.exe" : "keytool");
         if (!File.Exists(keytool)) keytool = AppPaths.FindTool("keytool");
         if (!File.Exists(KeyStore))
         {
