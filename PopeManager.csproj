@@ -3,6 +3,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <Version>1.0.0</Version>
     <RollForward>Major</RollForward>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -45,7 +46,7 @@
     <Compile Include="Program.cs" />
     <Compile Include="ManagerBackend.cs" />
     <Compile Include="Core/**/*.cs" />
-    <Content Include="adb/**/*;adb-linux/**/*;tools/fusion-generator/**/*;tools/android-build-tools/**/*;loader/**/*;Templates/**/*;logo.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="adb/**/*;adb-linux/**/*;tools/fusion-generator/**/*;tools/android-build-tools/**/*;loader/**/*;Templates/**/*;logo.png;puzzlesolved.ogg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="MakeBundledAdbExecutable" AfterTargets="Build;Publish" Condition="'$(OS)' != 'Windows_NT'">

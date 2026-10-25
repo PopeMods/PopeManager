@@ -15,7 +15,10 @@ public class ManagerBackend
     List<PluginEntry> mods = [];
     ManagerSettings settings = ManagerSettings.Load();
     CancellationTokenSource? operation;
-    bool scanning, busy, installed, hostInstalled;
+    bool scanning, refreshing, refreshRequested, busy, installed, hostInstalled;
+    long refreshEpoch;
+    bool checkingUpdates;
+    ReleaseCheck update = new(false, "", "", "");
     string selected = "", status = "Connect your Quest with a USB cable.", error = "", workspace = "", lastOutput = "";
     int step = -1;
     long revision;
@@ -41,6 +44,10 @@ public class ManagerBackend
             return JsonSerializer.Serialize(new
             {
                 revision, busy, scanning, installed, hostInstalled, selected, status, error, step, workspace, lastOutput,
+                appVersion = UpdateChecker.CurrentVersion, checkingUpdates,
+                updateAvailable = update.Available, updateVersion = update.Version, updateUrl = update.Url, updateStatus = update.Message,
+                puzzleSoundUrl = new Uri(Path.Combine(AppContext.BaseDirectory, "puzzlesolved.ogg")).AbsoluteUri,
+                logoUrl = new Uri(Path.Combine(AppContext.BaseDirectory, "logo.png")).AbsoluteUri,
                 devices = devices.Select(d => new { serial = d.Serial, name = d.Name, state = d.State, quest = d.IsQuest, installed = d.Installed, version = d.Version }),
                 canInstall = !busy && !scanning && headset is { State: "device", IsQuest: true, Installed: true },
                 mods = mods.Select(mod => new { fileName = mod.FileName, name = mod.Name, enabled = mod.Enabled }),
@@ -49,9 +56,36 @@ public class ManagerBackend
             });
         }
     }
-    public void Refresh()
+    public void CheckForUpdates()
     {
-        lock (gate) { if (busy || scanning) return; scanning = true; revision++; }
+        lock (gate)
+        {
+            if (checkingUpdates) return;
+            checkingUpdates = true;
+            revision++;
+        }
+        _ = Task.Run(async () =>
+        {
+            ReleaseCheck result;
+            try { result = await UpdateChecker.CheckAsync(UpdateChecker.CurrentVersion); }
+            catch (Exception e) when (e is HttpRequestException or OperationCanceledException or JsonException or InvalidDataException)
+            { result = new(false, "", "", "Couldn't check for updates. Try again later."); }
+            lock (gate) { update = result; checkingUpdates = false; revision++; }
+        });
+    }
+    public void Refresh() => StartRefresh(false);
+    public void RefreshSilently() => StartRefresh(true);
+    void StartRefresh(bool silent)
+    {
+        long epoch;
+        lock (gate)
+        {
+            if (busy) return;
+            if (refreshing) { if (!silent) refreshRequested = true; return; }
+            refreshing = true;
+            epoch = refreshEpoch;
+            if (!silent) { scanning = true; revision++; }
+        }
         _ = Task.Run(async () =>
         {
             try
@@ -60,13 +94,17 @@ public class ManagerBackend
                 var found = await adb.Detect(timeout.Token);
                 lock (gate)
                 {
+                    // A user action takes priority over an in-flight background read.
+                    if (busy || epoch != refreshEpoch) return;
+                    var previous = devices.FirstOrDefault(d => d.Serial == selected);
+                    bool changed = !devices.SequenceEqual(found);
                     devices = found;
                     if (!devices.Any(d => d.Serial == selected)) { selected = ""; installed = false; mods = []; }
                     var ready = devices.Where(d => d is { State: "device", IsQuest: true }).ToList();
                     if (selected.Length == 0 && ready.Count == 1) selected = ready[0].Serial;
                     hostInstalled = devices.FirstOrDefault(d => d.Serial == selected)?.HostInstalled ?? false;
                     installed = installed || hostInstalled;
-                    if (step < 0)
+                    if (step < 0 && (!silent || previous != devices.FirstOrDefault(d => d.Serial == selected)))
                     {
                         var current = devices.FirstOrDefault(d => d.Serial == selected);
                         status = devices.Count == 0 ? "No headset detected. Connect your Quest via USB."
@@ -78,22 +116,44 @@ public class ManagerBackend
                             : current != null ? "Install the game on this headset first."
                             : "No supported Quest is ready.";
                     }
-                    revision++;
+                    if (!silent || changed) revision++;
                 }
                 string serial; lock (gate) serial = selected;
                 if (found.Any(device => device.Serial == serial && device.State == "device" && device.IsQuest))
                 {
                     var plugins = await new PluginService(adb).List(serial, timeout.Token);
-                    lock (gate) { if (serial == selected) { mods = plugins; revision++; } }
+                    lock (gate)
+                    {
+                        if (!busy && epoch == refreshEpoch && serial == selected && !mods.SequenceEqual(plugins))
+                        { mods = plugins; revision++; }
+                    }
                 }
             }
-            catch (Exception e) { lock (gate) { error = e is OperationCanceledException ? "ADB detection timed out." : e.Message; revision++; } }
-            finally { lock (gate) { scanning = false; revision++; } }
+            catch (Exception e)
+            {
+                lock (gate)
+                {
+                    if (!busy && epoch == refreshEpoch && !silent)
+                    { error = e is OperationCanceledException ? "ADB detection timed out." : e.Message; revision++; }
+                }
+            }
+            finally
+            {
+                bool repeat;
+                lock (gate)
+                {
+                    refreshing = false;
+                    repeat = refreshRequested;
+                    refreshRequested = false;
+                    if (scanning) { scanning = false; revision++; }
+                }
+                if (repeat) Refresh();
+            }
         });
     }
     public void SelectDevice(string serial)
     {
-        lock (gate) { if (busy || !devices.Any(d => d.Serial == serial)) return; selected = serial; installed = false; mods = []; step = -1; error = ""; revision++; }
+        lock (gate) { if (busy || !devices.Any(d => d.Serial == serial)) return; refreshEpoch++; selected = serial; installed = false; mods = []; step = -1; error = ""; revision++; }
         Refresh();
     }
     public void SaveSettings(string loader, string generators, string unity)
@@ -114,6 +174,7 @@ public class ManagerBackend
             if (busy || scanning) return;
             if (devices.FirstOrDefault(d => d.Serial == selected) is not { State: "device", IsQuest: true, Installed: true })
             { error = "Choose a headset with with Gorilla Tag installed."; revision++; return; }
+            refreshEpoch++;
             serial = selected;
             config = new() { LoaderPath = settings.LoaderPath, GeneratorPath = settings.GeneratorPath, UnityLibrariesPath = settings.UnityLibrariesPath };
             busy = true; installed = false; error = ""; step = 0; lastOutput = "";
@@ -250,6 +311,7 @@ public class ManagerBackend
         lock (gate)
         {
             if (busy || scanning || !devices.Any(device => device.Serial == selected && device.State == "device" && device.IsQuest)) return;
+            refreshEpoch++;
             serial = selected; busy = true; error = ""; status = message; operation = new(); token = operation.Token; revision++;
         }
         _ = Task.Run(async () =>
