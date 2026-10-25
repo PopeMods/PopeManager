@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# exclude vendored android build tools from lang graph
+Tools/android-build-tools/android-14** linguist-vendored
