@@ -17,11 +17,27 @@ internal static class AppPaths
     }
     internal static string FindTool(string name)
     {
-        string executable = OperatingSystem.IsWindows() ? name + ".exe" : name;
+        string executable = OperatingSystem.IsWindows() && !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name + ".exe" : name;
         var paths = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator);
         return paths.Select(p => Path.Combine(p.Trim('"'), executable)).FirstOrDefault(File.Exists)
             ?? throw new FileNotFoundException($"{name} was not found on PATH.");
     }
+    internal static string FindJavaTool(string name)
+    {
+        string executable = OperatingSystem.IsWindows() ? name + ".exe" : name;
+        string? javaHome = Environment.GetEnvironmentVariable("JAVA_HOME");
+        if (!string.IsNullOrWhiteSpace(javaHome))
+        {
+            string path = Path.Combine(javaHome.Trim('"'), "bin", executable);
+            if (File.Exists(path)) return path;
+        }
+        try { return FindTool(name); }
+        catch (FileNotFoundException)
+        {
+            throw new FileNotFoundException($"Java tool '{name}' was not found. Install a JDK and set JAVA_HOME to its folder or add its bin folder to PATH.");
+        }
+    }
+
 }
 
 internal class ManagerSettings

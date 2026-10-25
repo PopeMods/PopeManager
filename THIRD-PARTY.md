@@ -16,3 +16,13 @@ This local development bundle is not a complete redistribution/license package. 
 publishing binaries, include all applicable dependency notices and corresponding source
 or source offers required by their licenses. The local patch and build instructions are
 included to make the modified FusionCore source reviewable and reproducible.
+
+
+## DepotDownloader and Steam login
+
+Bundled Windows and Linux DepotDownloader binaries: https://github.com/SteamRE/DepotDownloader
+(GPL-2.0; licenses shipped alongside each binary). Steam Frame downloads use app 1533390,
+depot 1533392, and the current public manifest resolved by DepotDownloader.
+The Steam login layout and QR PNG renderer are adapted from the user's GTCLauncher project.
+GTCDistLib is not included in that source folder, so PopeManager reads DepotDownloader's
+QR output directly. QR challenges are held only in memory and excluded from logs.

@@ -33,7 +33,6 @@ internal class AdbManager(ICommandRunner runner, string? executableOverride = nu
         return File.Exists(linux) ? linux : null;
     }
 
-    /// <summary>Archive extraction and some publish steps drop the executable bit on Unix.</summary>
     internal static void EnsureExecutable(string path)
     {
         if (OperatingSystem.IsWindows()) return;
@@ -50,6 +49,19 @@ internal class AdbManager(ICommandRunner runner, string? executableOverride = nu
     internal static string Quote(string text) => "'" + text.Replace("'", "'\"'\"'") + "'";
     internal Task<CommandResult> Shell(string serial, CancellationToken token, bool check, params string[] args) =>
         Run(serial, ["shell", string.Join(" ", args.Select(Quote))], token, check: check);
+
+    internal async Task<List<string>> PackagePaths(string serial, CancellationToken token)
+    {
+        var result = await Shell(serial, token, false, "pm", "path", AppPaths.OriginalPackage);
+        if (result.ExitCode == 0) return ParsePaths(result.Output);
+        if (result.ExitCode == 1 && string.IsNullOrWhiteSpace(result.Output))
+        {
+            var state = await Run(serial, ["get-state"], token, check: false);
+            if (state.ExitCode == 0 && state.Output.Trim() == "device") return [];
+            throw new IOException("The headset disconnected while checking Gorilla Tag." + state.Output.Trim());
+        }
+        throw new IOException("Could not read Gorilla Tag's installed APK paths: " + result.Output.Trim());
+    }
 
     internal static List<(string Serial, string State)> ParseDevices(string output) => output.Split('\n')
         .Select(line => line.Trim())

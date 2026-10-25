@@ -5,7 +5,6 @@ using System.Xml.Linq;
 
 namespace PopeManager;
 
-/// <summary>Publishes complete, versioned development references at one stable app-data entry point.</summary>
 internal static class ModDevelopmentLibraries
 {
     static readonly object Gate = new();
@@ -117,8 +116,6 @@ internal static class ModDevelopmentLibraries
     {
         lock (Gate)
         {
-            // Completed snapshots never change; existing builds can keep using them
-            // while a new game/runtime version is prepared alongside them.
             if (File.Exists(Path.Combine(destination, ".complete")) && usable(destination)) return destination;
             Directory.CreateDirectory(Root);
             var repaired = Directory.EnumerateDirectories(Root, Path.GetFileName(destination) + "-repaired-*")

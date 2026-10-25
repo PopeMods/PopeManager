@@ -46,10 +46,12 @@
     <Compile Include="Program.cs" />
     <Compile Include="ManagerBackend.cs" />
     <Compile Include="Core/**/*.cs" />
-    <Content Include="adb/**/*;adb-linux/**/*;tools/fusion-generator/**/*;tools/android-build-tools/**/*;loader/**/*;Templates/**/*;logo.png;puzzlesolved.ogg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="adb/**/*;adb-linux/**/*;depotdownloader/**/*;depotdownloader-linux/**/*;tools/fusion-generator/**/*;tools/android-build-tools/**/*;loader/**/*;Templates/**/*;logo.png;puzzlesolved.ogg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="MakeBundledAdbExecutable" AfterTargets="Build;Publish" Condition="'$(OS)' != 'Windows_NT'">
+    <Exec Command="if [ -f &quot;$(OutDir)depotdownloader-linux/DepotDownloader&quot; ]; then chmod +x &quot;$(OutDir)depotdownloader-linux/DepotDownloader&quot;; fi" />
+    <Exec Command="if [ -f &quot;$(PublishDir)depotdownloader-linux/DepotDownloader&quot; ]; then chmod +x &quot;$(PublishDir)depotdownloader-linux/DepotDownloader&quot;; fi" />
     <Exec Command="if [ -f &quot;$(OutDir)adb-linux/adb&quot; ]; then chmod +x &quot;$(OutDir)adb-linux/adb&quot;; fi" />
     <Exec Command="if [ -f &quot;$(PublishDir)adb-linux/adb&quot; ]; then chmod +x &quot;$(PublishDir)adb-linux/adb&quot;; fi" />
   </Target>

@@ -10,7 +10,7 @@ ApplicationWindow {
     visible: true
     title: "PopeManager"
     width: patched ? 1040 : 720
-    height: patched ? 740 : 500
+    height: state.busy ? 620 : patched ? 740 : 500
     minimumWidth: patched ? 840 : 560
     minimumHeight: patched ? 600 : 420
     font.family: "Segoe UI"
@@ -20,6 +20,22 @@ ApplicationWindow {
     ManagerBackend { id: backend }
     property var state: ({ busy:false, scanning:false, hostInstalled:false, devices:[], selected:"", status:"", error:"", canInstall:false, log:"" })
     property string offeredUpdate: ""
+    property var promptedHeadsets: []
+    function autoPrepare() {
+        // Do not restart cancelled or failed attempts until the headset reconnects.
+        var connectedSerials = state.devices.filter(function(device) {
+            return device.state === "device" && device.quest
+        }).map(function(device) { return device.serial })
+        promptedHeadsets = promptedHeadsets.filter(function(serial) {
+            return connectedSerials.indexOf(serial) >= 0
+        })
+        if (!connected || patched || state.busy || state.scanning || !state.canInstall ||
+                promptedHeadsets.indexOf(state.selected) >= 0) return false
+        promptedHeadsets = promptedHeadsets.concat([state.selected])
+        updateDialog.close()
+        backend.install()
+        return true
+    }
     property int revision: -1
     property int guideStep: 0
     property int page: 0
@@ -70,6 +86,7 @@ ApplicationWindow {
     function poll() {
         var next = JSON.parse(backend.snapshot())
         if (next.revision !== revision) { state = next; revision = next.revision }
+        if (autoPrepare()) return
         if (state.updateAvailable && !state.checkingUpdates && !state.busy && offeredUpdate !== state.updateVersion) {
             offeredUpdate = state.updateVersion
             updateDialog.releaseVersion = state.updateVersion
@@ -83,8 +100,9 @@ ApplicationWindow {
     Timer { interval: 5000; repeat: true; running: !window.state.busy; onTriggered: { if (window.patched) backend.refreshSilently(); else backend.refresh() } }
 
     StackLayout {
+        id: mainPages
         anchors.fill: parent
-        currentIndex: window.patched ? 2 : window.connected ? 1 : 0
+        currentIndex: window.state.steamLogin ? 3 : window.state.busy && window.state.step >= 0 ? 4 : window.patched ? 2 : window.connected ? 1 : 0
 
         Item {
             Label { anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 28; text: "PopeManager"; font.pixelSize: 22 }
@@ -163,7 +181,7 @@ ApplicationWindow {
                     onActivated: function(index) { backend.selectDevice(model[index].serial) }
                 }
                 Button {
-                    text: window.state.busy ? "Patching..." : window.state.hostInstalled ? "Patch again" : "Patch Gorilla Tag"
+                    text: window.state.busy ? "Preparing..." : window.state.hostInstalled ? "Patch again" : "Sign in with Steam"
                     highlighted: true
                     enabled: window.state.canInstall
                     onClicked: backend.install()
@@ -419,6 +437,98 @@ ApplicationWindow {
                             }
                         }
                     }
+                }
+            }
+        }
+        Item {
+            id: steamPage
+            onVisibleChanged: { if (!visible) { steamPassword.clear(); steamCode.clear() } }
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 28
+                spacing: 16
+                Label { text: "PopeManager"; font.pixelSize: 22 }
+                ScrollView {
+                    id: steamScroll
+                    Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                    contentWidth: availableWidth
+                    ColumnLayout {
+                        width: steamScroll.availableWidth
+                        spacing: 14
+                        Label { text: window.state.steamDownloading ? "Downloading Steam Frame build" : "Sign in with Steam"; font.pixelSize: 28 }
+                        Caption { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Sign in with your account, or scan the QR code with Steam Mobile." }
+                        GridLayout {
+                            visible: !window.state.steamDownloading; Layout.fillWidth: true; columns: steamScroll.availableWidth < 550 ? 1 : 2; columnSpacing: 32; rowSpacing: 20
+                            ColumnLayout {
+                                Layout.fillWidth: true; Layout.minimumWidth: 180; spacing: 8
+                                Label { text: "Username" }
+                                TextField { id: steamUsername; Layout.fillWidth: true; placeholderText: "Steam username"; enabled: window.state.steamProgress === 0 }
+                                Label { text: "Password" }
+                                TextField { id: steamPassword; Layout.fillWidth: true; placeholderText: "Password"; echoMode: TextInput.Password; enabled: window.state.steamProgress === 0 }
+                                Button {
+                                    text: "Log in"; highlighted: true; Layout.fillWidth: true
+                                    enabled: steamUsername.text.length > 0 && steamPassword.text.length > 0 && window.state.steamProgress === 0
+                                    onClicked: { backend.loginWithPassword(steamUsername.text, steamPassword.text); steamPassword.clear() }
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.alignment: Qt.AlignHCenter; spacing: 10
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignHCenter; Layout.preferredWidth: 220; Layout.preferredHeight: 220; color: "white"; radius: 8
+                                    visible: !!window.state.steamQr
+                                    Image { id: steamQrImage; anchors.fill: parent; anchors.margins: 8; source: window.state.steamQr || ""; smooth: false; mipmap: false; fillMode: Image.PreserveAspectFit }
+                                }
+                                BusyIndicator { Layout.alignment: Qt.AlignHCenter; visible: !window.state.steamQr; running: visible }
+                                Caption { Layout.alignment: Qt.AlignHCenter; text: "Scan with the Steam Mobile App" }
+                            }
+                        }
+                        Label { Layout.fillWidth: true; visible: !!window.state.steamPrompt; text: window.state.steamPrompt || ""; wrapMode: Text.Wrap }
+                        RowLayout {
+                            Layout.fillWidth: true; visible: !!window.state.steamPrompt
+                            TextField { id: steamCode; Layout.fillWidth: true; placeholderText: "Steam Guard code"; echoMode: TextInput.Password; onAccepted: { backend.submitSteamCode(text); clear() } }
+                            Button { text: "Submit"; onClicked: { backend.submitSteamCode(steamCode.text); steamCode.clear() } }
+                        }
+                    }
+                }
+                ProgressBar { Layout.fillWidth: true; from: 0; to: 100; value: window.state.steamProgress || 0; indeterminate: value === 0 && !window.state.steamQr }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Caption { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.state.status }
+                    Button { text: "Cancel"; flat: true; onClicked: backend.cancel() }
+                }
+            }
+        }
+        Item {
+            id: operationPage
+            ColumnLayout {
+                anchors.fill: parent; anchors.margins: 28; spacing: 16
+                Label { text: "PopeManager"; font.pixelSize: 22 }
+                Label { text: window.state.steamDownloading ? "Downloading Steam Frame build" : "Preparing Gorilla Tag"; font.pixelSize: 28 }
+                Rectangle {
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    color: "#222222"; radius: 8
+                    ScrollView {
+                        anchors.fill: parent; anchors.margins: 12; clip: true
+                        TextArea {
+                            id: operationLog
+                            text: window.state.log || ""
+                            readOnly: true; selectByMouse: true
+                            wrapMode: TextEdit.WrapAnywhere
+                            font.family: "Consolas"; font.pixelSize: 12
+                            background: null
+                            onTextChanged: cursorPosition = length
+                        }
+                    }
+                }
+                ProgressBar {
+                    Layout.fillWidth: true; from: 0; to: 100
+                    value: window.state.steamProgress || 0
+                    indeterminate: !window.state.steamDownloading || value <= 0
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Caption { Layout.fillWidth: true; wrapMode: Text.Wrap; text: window.state.status }
+                    Button { text: "Cancel"; flat: true; onClicked: backend.cancel() }
                 }
             }
         }

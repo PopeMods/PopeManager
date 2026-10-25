@@ -1,6 +1,5 @@
 namespace PopeManager;
 
-/// <summary>Preserves expansion data and plugins before an APK signing-key replacement.</summary>
 internal sealed class GameDataBackup(AdbManager adb)
 {
     const string ObbRoot = "/sdcard/Android/obb/" + AppPaths.OriginalPackage;
@@ -40,6 +39,25 @@ internal sealed class GameDataBackup(AdbManager adb)
             names.Add(name);
         }
         return names;
+    }
+
+    internal void UseDepotExpansion(string depot, string destination, bool required)
+    {
+        DirectoryPath = destination;
+        var files = Directory.EnumerateFiles(depot, "*", SearchOption.AllDirectories)
+            .Where(path => path.EndsWith(".obb", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (required && files.Count == 0)
+            throw new IOException("The Steam Frame APK requires expansion data, but its depot contains no OBB files. The headset has not been changed.");
+        foreach (string file in files)
+        {
+            string name = Path.GetFileName(file);
+            if (!name.EndsWith("." + AppPaths.OriginalPackage + ".obb", StringComparison.Ordinal))
+                throw new InvalidDataException("Unexpected Steam expansion package: " + name);
+            if (obbNames.Contains(name)) throw new InvalidDataException("Duplicate Steam expansion file: " + name);
+            Directory.CreateDirectory(Path.Combine(destination, "obb"));
+            File.Copy(file, Path.Combine(destination, "obb", name), false);
+            obbNames.Add(name);
+        }
     }
 
     static string Hash(string path) => FusionHost.Sha256(path);

@@ -4,7 +4,6 @@ using System.Text.Json;
 
 namespace PopeManager;
 
-// QML polls a locked snapshot; worker threads never touch QObject properties.
 public class ManagerBackend
 {
     readonly object gate = new();
@@ -20,6 +19,10 @@ public class ManagerBackend
     bool checkingUpdates;
     ReleaseCheck update = new(false, "", "", "");
     string selected = "", status = "Connect your Quest with a USB cable.", error = "", workspace = "", lastOutput = "";
+    SteamFrameDownloader? steam;
+    bool steamLogin, steamDownloading, headless;
+    string steamQr = "", steamPrompt = "";
+    float steamProgress;
     int step = -1;
     long revision;
     readonly string logFile;
@@ -44,12 +47,13 @@ public class ManagerBackend
             return JsonSerializer.Serialize(new
             {
                 revision, busy, scanning, installed, hostInstalled, selected, status, error, step, workspace, lastOutput,
+                steamLogin, steamDownloading, steamQr, steamPrompt, steamProgress,
                 appVersion = UpdateChecker.CurrentVersion, checkingUpdates,
                 updateAvailable = update.Available, updateVersion = update.Version, updateUrl = update.Url, updateStatus = update.Message,
                 puzzleSoundUrl = new Uri(Path.Combine(AppContext.BaseDirectory, "puzzlesolved.ogg")).AbsoluteUri,
                 logoUrl = new Uri(Path.Combine(AppContext.BaseDirectory, "logo.png")).AbsoluteUri,
                 devices = devices.Select(d => new { serial = d.Serial, name = d.Name, state = d.State, quest = d.IsQuest, installed = d.Installed, version = d.Version }),
-                canInstall = !busy && !scanning && headset is { State: "device", IsQuest: true, Installed: true },
+                canInstall = !busy && !scanning && headset is { State: "device", IsQuest: true },
                 mods = mods.Select(mod => new { fileName = mod.FileName, name = mod.Name, enabled = mod.Enabled }),
                 log = string.Join('\n', logs),
                 settings = new { loader = settings.LoaderPath, generators = settings.GeneratorPath, unity = settings.UnityLibrariesPath }
@@ -94,7 +98,6 @@ public class ManagerBackend
                 var found = await adb.Detect(timeout.Token);
                 lock (gate)
                 {
-                    // A user action takes priority over an in-flight background read.
                     if (busy || epoch != refreshEpoch) return;
                     var previous = devices.FirstOrDefault(d => d.Serial == selected);
                     bool changed = !devices.SequenceEqual(found);
@@ -113,7 +116,7 @@ public class ManagerBackend
                             : ready.Count > 1 && selected.Length == 0 ? "Choose the headset you want to use."
                             : current is { Installed: true } && hostInstalled ? "Already patched."
                             : current is { Installed: true } ? "Ready."
-                            : current != null ? "Install the game on this headset first."
+                            : current != null ? "Ready to download Gorilla Tag from Steam."
                             : "No supported Quest is ready.";
                     }
                     if (!silent || changed) revision++;
@@ -172,30 +175,33 @@ public class ManagerBackend
         lock (gate)
         {
             if (busy || scanning) return;
-            if (devices.FirstOrDefault(d => d.Serial == selected) is not { State: "device", IsQuest: true, Installed: true })
-            { error = "Choose a headset with with Gorilla Tag installed."; revision++; return; }
+            if (devices.FirstOrDefault(d => d.Serial == selected) is not { State: "device", IsQuest: true })
+            { error = "Choose an authorized Quest headset."; revision++; return; }
             refreshEpoch++;
             serial = selected;
             config = new() { LoaderPath = settings.LoaderPath, GeneratorPath = settings.GeneratorPath, UnityLibrariesPath = settings.UnityLibrariesPath };
             busy = true; installed = false; error = ""; step = 0; lastOutput = "";
-            operation = new(); token = operation.Token; revision++;
+            operation = new(); token = operation.Token; steam = new(); headless = false;
+            steamLogin = true; steamDownloading = false; steamQr = ""; steamPrompt = ""; steamProgress = 0;
+            status = "Sign in with Steam to download the latest Steam Frame build"; revision++;
         }
         _ = Task.Run(() => InstallAsync(serial, config, token));
     }
     internal async Task<int> RunHeadlessInstall(CancellationToken token)
     {
         var ready = (await adb.Detect(token))
-            .Where(device => device is { State: "device", IsQuest: true, Installed: true }).ToList();
+            .Where(device => device is { State: "device", IsQuest: true }).ToList();
         if (ready.Count != 1)
         {
             string message = ready.Count == 0
-                ? "Connect a Quest with Gorilla Tag installed."
+                ? "Connect an authorized Quest headset."
                 : "Multiple eligible headsets are connected. Pick one.";
             Log(message);
             Console.Error.WriteLine(message);
             return 1;
         }
 
+        steam = new(); headless = true;
         await InstallAsync(ready[0].Serial, settings, token);
         Console.WriteLine(Snapshot());
         lock (gate) return installed && error.Length == 0 ? 0 : 1;
@@ -205,49 +211,61 @@ public class ManagerBackend
         List<string>? restoreSet = null;
         bool officialAppRemoved = false;
         var dataBackup = new GameDataBackup(adb);
+        var steamData = new GameDataBackup(adb);
         try
         {
             Stage(0, "Preparing..."); FusionHost.ValidateEnvironment(config);
             await new ApkMaker(runner).PrepareSigningKey(token, Log);
             var online = await adb.Detect(token);
-            if (!online.Any(d => d.Serial == serial && d.State == "device" && d.IsQuest && d.Installed)) throw new IOException("The selected headset disconnected or Gorilla Tag is missing.");
+            if (!online.Any(d => d.Serial == serial && d.State == "device" && d.IsQuest)) throw new IOException("The selected headset disconnected.");
             string work = Path.Combine(AppPaths.Data, "sessions", DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6]);
             Directory.CreateDirectory(work); lock (gate) { workspace = work; revision++; }
-            var paths = AdbManager.ParsePaths((await adb.Shell(serial, token, true, "pm", "path", AppPaths.OriginalPackage)).Output);
-            if (paths.Count == 0) throw new IOException("Gorilla Tag has no readable APK paths.");
-            string pulled = Path.Combine(work, "original"); Directory.CreateDirectory(pulled); var local = new List<string>();
+            Stage(1, "Sign in with Steam to download the latest Steam Frame build");
+            lock (gate) { steamLogin = true; steamProgress = 0; steamQr = ""; steamPrompt = ""; revision++; }
+            var local = await steam!.Download(Path.Combine(work, "steam-frame"), Log,
+                image => { lock (gate) { steamQr = image; revision++; } },
+                value => { lock (gate) { steamProgress = value; status = value > 0 ? "Downloading Steam Frame build... " + value.ToString("F1") + "%" : "Downloading Steam Frame build..."; revision++; } },
+                prompt => { lock (gate) { steamPrompt = prompt; revision++; } }, token, headless,
+                () => { lock (gate) { steamLogin = false; steamDownloading = true; status = "Downloading Steam Frame build..."; revision++; } });
+            lock (gate) { steamLogin = false; steamDownloading = false; steamQr = ""; steamPrompt = ""; revision++; }
+            var apkInputs = ApkInspector.Inspect(local);
+            string baseApk = apkInputs.Single(apk => apk.Manifest.Split.Length == 0).Path;
+            bool requiresObb;
+            using (var apk = ZipFile.OpenRead(baseApk)) requiresObb = apk.GetEntry("assets/unity_obb_guid") != null;
+            steamData.UseDepotExpansion(Path.Combine(work, "steam-frame"), Path.Combine(work, "steam-data"), requiresObb);
+
+            Stage(1, "Backing up the headset installation and plugins");
+            var paths = await adb.PackagePaths(serial, token);
+            string pulled = Path.Combine(work, "original"); Directory.CreateDirectory(pulled);
+            if (paths.Count == 0) Log("Gorilla Tag is not installed; continuing without an APK backup.");
+            restoreSet = [];
             for (int i = 0; i < paths.Count; ++i)
             {
                 string file = Path.Combine(pulled, i.ToString("D2") + "-" + Path.GetFileName(paths[i]));
-                Stage(1, $"Pulling APK {i + 1} of {paths.Count}");
-                await adb.Run(serial, ["pull", paths[i], file], token, Log); local.Add(file);
+                await adb.Run(serial, ["pull", paths[i], file], token, Log); restoreSet.Add(file);
             }
-            restoreSet = local;
-            _ = ApkInspector.Inspect(local);
-            bool requiresObb = false;
-            foreach (var apkPath in local)
-            {
-                using var apk = ZipFile.OpenRead(apkPath);
-                requiresObb |= apk.GetEntry("assets/unity_obb_guid") != null;
-            }
-            Stage(1, "Backing up data");
-            await dataBackup.Capture(serial, work, requiresObb, Log, token);
+            await dataBackup.Capture(serial, work, false, Log, token);
             var inputs = await DependencyGenerator.Extract(local, Path.Combine(work, "inputs"), token);
             Log("Detected Unity " + inputs.UnityVersion + ". Generating libs...");
             string libraries = await new DependencyGenerator(runner).Generate(inputs, work, config, Stage, Log, token);
             lock (gate) { lastOutput = work; revision++; }
             token.ThrowIfCancellationRequested(); Stage(3, "Building the payload");
             string patched = Path.Combine(work, "patched", "base.apk");
-            GtagPayload.Build(local.Single(apk => ApkInspector.ReadManifest(ZipFile.OpenRead(apk)).Split.Length == 0), config.LoaderPath, libraries, patched, dataBackup.PluginsPath);
-            var patchSet = local.Select(apk => ApkInspector.ReadManifest(ZipFile.OpenRead(apk)).Split.Length == 0 ? patched : apk).ToList();
+            GtagPayload.Build(baseApk, config.LoaderPath, libraries, patched, dataBackup.PluginsPath);
+            var patchSet = apkInputs.Select(apk => apk.Manifest.Split.Length == 0 ? patched : apk.Path).ToList();
             Stage(4, "Aligning and signing the APK...");
             var signed = await new ApkMaker(runner).SignSet(patchSet, Path.Combine(work, "install"), token, Log);
-            token.ThrowIfCancellationRequested(); Stage(5, "Insatlling...");
-            await adb.Run(serial, ["uninstall", AppPaths.OriginalPackage], token, Log);
-            officialAppRemoved = true;
+            token.ThrowIfCancellationRequested(); Stage(5, "Installing the patched Steam Frame build...");
+            if (restoreSet.Count > 0)
+            {
+                // Observe cancellation after uninstall so recovery can restore the package.
+                await adb.Run(serial, ["uninstall", AppPaths.OriginalPackage], CancellationToken.None, Log);
+                officialAppRemoved = true;
+                token.ThrowIfCancellationRequested();
+            }
             var install = await adb.Run(serial, ["install-multiple", "-r", "-g", .. signed], token, Log);
             if (!install.Output.Contains("Success", StringComparison.OrdinalIgnoreCase)) throw new IOException("ADB did not report a successful installation.");
-            await dataBackup.RestoreObb(serial, Log, token);
+            await steamData.RestoreObb(serial, Log, token);
             var verify = await adb.Shell(serial, token, true, "pm", "path", AppPaths.OriginalPackage);
             if (AdbManager.ParsePaths(verify.Output).Count == 0) throw new IOException("The patched Gorilla Tag package could not be verified.");
             lock (gate) installed = true;
@@ -262,8 +280,9 @@ public class ManagerBackend
                 {
                     Log("Preparation cancelled");
                     var present = await adb.Shell(serial, CancellationToken.None, false, "pm", "path", AppPaths.OriginalPackage);
-                    if (AdbManager.ParsePaths(present.Output).Count == 0)
-                        await adb.Run(serial, ["install-multiple", "-r", .. restoreSet], CancellationToken.None, Log);
+                    if (AdbManager.ParsePaths(present.Output).Count > 0)
+                        await adb.Run(serial, ["uninstall", AppPaths.OriginalPackage], CancellationToken.None, Log);
+                    await adb.Run(serial, ["install-multiple", "-r", .. restoreSet], CancellationToken.None, Log);
                     await dataBackup.RestoreObb(serial, Log, CancellationToken.None);
                 }
                 catch (Exception restoreError) { Log("Recovery failed, here are backups: " + restoreError.Message); }
@@ -278,6 +297,9 @@ public class ManagerBackend
                 try
                 {
                     Log("Patched install failed. Restoring...");
+                    var present = await adb.Shell(serial, CancellationToken.None, false, "pm", "path", AppPaths.OriginalPackage);
+                    if (AdbManager.ParsePaths(present.Output).Count > 0)
+                        await adb.Run(serial, ["uninstall", AppPaths.OriginalPackage], CancellationToken.None, Log);
                     await adb.Run(serial, ["install-multiple", "-r", .. restoreSet], CancellationToken.None, Log);
                     await dataBackup.RestoreObb(serial, Log, CancellationToken.None);
                     Log("Original stuff.");
@@ -289,7 +311,7 @@ public class ManagerBackend
             lock (gate) { error = message; status = "Couldnt complete preparation."; revision++; }
             Log(e.ToString());
         }
-        finally { lock (gate) { busy = false; operation?.Dispose(); operation = null; revision++; } }
+        finally { lock (gate) { busy = false; steamLogin = false; steamDownloading = false; steamQr = ""; steamPrompt = ""; steam = null; operation?.Dispose(); operation = null; revision++; } }
     }
     public void LaunchHost()
     {
@@ -326,6 +348,14 @@ public class ManagerBackend
             catch (Exception e) { lock (gate) { error = e is OperationCanceledException ? "Cancelled." : e.Message; revision++; } }
             finally { lock (gate) { busy = false; operation?.Dispose(); operation = null; revision++; } }
         });
+    }
+    public void LoginWithPassword(string username, string password)
+    {
+        lock (gate) { if (busy && steamLogin) steam?.LoginWithPassword(username, password); }
+    }
+    public void SubmitSteamCode(string code)
+    {
+        lock (gate) { if (busy && steamLogin) { steam?.SendInput(code); steamPrompt = ""; revision++; } }
     }
     public void Cancel() { lock (gate) operation?.Cancel(); }
     public void OpenOutput() => OpenFolder(lastOutput.Length > 0 ? lastOutput : AppPaths.Data);

@@ -22,6 +22,7 @@ internal class ProcessRunner : ICommandRunner
             WorkingDirectory = workingDirectory ?? AppPaths.Data,
             StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
         };
+        info.Environment.Remove("DOTNET_STARTUP_HOOKS");
         foreach (var arg in args) info.ArgumentList.Add(arg);
         info.Environment["ANDROID_USER_HOME"] = Path.Combine(AppPaths.Data, "android");
         info.Environment["NO_COLOR"] = "1";

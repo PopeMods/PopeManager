@@ -6,7 +6,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Reference the exact managed generators shipped inside the selected host APK. -->
     <Reference Include="lib/*.dll"><Private>true</Private></Reference>
   </ItemGroup>
   <Target Name="CheckFusionLibraries" BeforeTargets="ResolveReferences">

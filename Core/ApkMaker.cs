@@ -12,9 +12,7 @@ internal class ApkMaker(ICommandRunner runner)
         Root,
         OperatingSystem.IsWindows() ? "zipalign.exe" : "zipalign");
 
-    string ApkSigner => Path.Combine(
-        Root,
-        OperatingSystem.IsWindows() ? "apksigner.bat" : "apksigner");
+    string ApkSignerJar => Path.Combine(Root, "lib", "apksigner.jar");
 
     string KeyStore => Path.Combine(AppPaths.Data, "signing", "popemanager-gorillatag.jks");
     const string Alias = "popemanager";
@@ -22,18 +20,17 @@ internal class ApkMaker(ICommandRunner runner)
 
     internal void Validate()
     {
-        if (!File.Exists(ZipAlign) || !File.Exists(ApkSigner))
+        if (!File.Exists(ZipAlign) || !File.Exists(ApkSignerJar))
             throw new IOException(
                 $"Android build tools are missing for {System.Runtime.InteropServices.RuntimeInformation.OSDescription}. " +
-                $"Expected zipalign at '{ZipAlign}' and apksigner at '{ApkSigner}'.");
+                $"Expected zipalign at '{ZipAlign}' and apksigner.jar at '{ApkSignerJar}'.");
     }
 
     internal async Task PrepareSigningKey(CancellationToken token, Action<string> log)
     {
         Validate();
-        string keytool = AppPaths.FindTool(
-            OperatingSystem.IsWindows() ? "keytool.exe" : "keytool");
-        if (!File.Exists(keytool)) keytool = AppPaths.FindTool("keytool");
+        string keytool = AppPaths.FindJavaTool("keytool");
+        _ = AppPaths.FindJavaTool("java");
         if (!File.Exists(KeyStore))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(KeyStore)!);
@@ -55,9 +52,9 @@ internal class ApkMaker(ICommandRunner runner)
         {
             string name = Path.GetFileNameWithoutExtension(input), aligned = Path.Combine(output, name + ".aligned.apk"), final = Path.Combine(output, name + ".apk");
             await runner.RunAsync(ZipAlign, ["-f", "-p", "4", input, aligned], token, log);
-            await runner.RunAsync(ApkSigner, ["sign", "--ks", KeyStore, "--ks-key-alias", Alias, "--ks-pass", "pass:" + Password,
+            await runner.RunAsync(AppPaths.FindJavaTool("java"), ["-Xmx1024M", "-Xss1m", "-jar", ApkSignerJar, "sign", "--ks", KeyStore, "--ks-key-alias", Alias, "--ks-pass", "pass:" + Password,
                 "--key-pass", "pass:" + Password, "--out", final, aligned], token, log);
-            await runner.RunAsync(ApkSigner, ["verify", "--verbose", final], token, log);
+            await runner.RunAsync(AppPaths.FindJavaTool("java"), ["-jar", ApkSignerJar, "verify", "--verbose", final], token, log);
             signed.Add(final);
         }
         return signed;
