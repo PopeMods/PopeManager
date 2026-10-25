@@ -19,7 +19,7 @@ public class ManagerBackend
     bool checkingUpdates;
     ReleaseCheck update = new(false, "", "", "");
     string selected = "", status = "Connect your Quest with a USB cable.", error = "", workspace = "", lastOutput = "";
-    SteamFrameDownloader? steam;
+    SteamDownloader? steam;
     bool steamLogin, steamDownloading, headless;
     string steamQr = "", steamPrompt = "";
     float steamProgress;

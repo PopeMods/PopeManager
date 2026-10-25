@@ -16,7 +16,6 @@ internal static class UpdateChecker
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
         ?? typeof(UpdateChecker).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
 
-    // Release labels and build metadata do not change the numeric app version.
     internal static Version? ParseVersion(string? text)
     {
         if (text == null) return null;
@@ -53,7 +52,6 @@ internal static class UpdateChecker
         if (latest == null || current == null)
             return new(false, "", "", "Couldn't compare release versions.");
         if (latest <= current) return new(false, "", "", "You're up to date.");
-        // Construct the destination from the known repository and the returned tag.
         return new(true, tag, RepositoryUrl + "/releases/tag/" + Uri.EscapeDataString(tag), "Version " + tag + " is available.");
     }
 }

@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace PopeManager;
 
-internal sealed class SteamFrameDownloader(string? executableOverride = null)
+internal sealed class SteamDownloader(string? executableOverride = null)
 {
     readonly object gate = new();
     Process? process;
@@ -120,7 +120,7 @@ internal sealed class SteamFrameDownloader(string? executableOverride = null)
     {
         var apks = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .Where(p => p.EndsWith(".apk", StringComparison.OrdinalIgnoreCase)).Order(StringComparer.Ordinal).ToList();
-        if (apks.Count == 0) throw new InvalidDataException("Steam Frame depot 1533392 did not contain any APKs. The headset has not been changed.");
+        if (apks.Count == 0) throw new InvalidDataException("The Gorilla Tag Android depot did not contain any APKs.");
         _ = ApkInspector.Inspect(apks);
         return apks;
     }
