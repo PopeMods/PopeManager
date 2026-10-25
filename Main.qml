@@ -455,7 +455,7 @@ ApplicationWindow {
                     ColumnLayout {
                         width: steamScroll.availableWidth
                         spacing: 14
-                        Label { text: window.state.steamDownloading ? "Downloading Steam Frame build" : "Sign in with Steam"; font.pixelSize: 28 }
+                        Label { text: window.state.steamDownloading ? "Downloading build" : "Sign in with Steam"; font.pixelSize: 28 }
                         Caption { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Sign in with your account, or scan the QR code with Steam Mobile." }
                         GridLayout {
                             visible: !window.state.steamDownloading; Layout.fillWidth: true; columns: steamScroll.availableWidth < 550 ? 1 : 2; columnSpacing: 32; rowSpacing: 20
@@ -502,8 +502,7 @@ ApplicationWindow {
             id: operationPage
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 28; spacing: 16
-                Label { text: "PopeManager"; font.pixelSize: 22 }
-                Label { text: window.state.steamDownloading ? "Downloading Steam Frame build" : "Preparing Gorilla Tag"; font.pixelSize: 28 }
+                Label { text: window.state.steamDownloading ? "Downloading build" : "Preparing Gorilla Tag"; font.pixelSize: 28 }
                 Rectangle {
                     Layout.fillWidth: true; Layout.fillHeight: true
                     color: "#222222"; radius: 8

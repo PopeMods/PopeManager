@@ -183,7 +183,7 @@ public class ManagerBackend
             busy = true; installed = false; error = ""; step = 0; lastOutput = "";
             operation = new(); token = operation.Token; steam = new(); headless = false;
             steamLogin = true; steamDownloading = false; steamQr = ""; steamPrompt = ""; steamProgress = 0;
-            status = "Sign in with Steam to download the latest Steam Frame build"; revision++;
+            status = "Sign in with Steam"; revision++;
         }
         _ = Task.Run(() => InstallAsync(serial, config, token));
     }
@@ -220,7 +220,7 @@ public class ManagerBackend
             if (!online.Any(d => d.Serial == serial && d.State == "device" && d.IsQuest)) throw new IOException("The selected headset disconnected.");
             string work = Path.Combine(AppPaths.Data, "sessions", DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6]);
             Directory.CreateDirectory(work); lock (gate) { workspace = work; revision++; }
-            Stage(1, "Sign in with Steam to download the latest Steam Frame build");
+            Stage(1, "Sign in with Steam");
             lock (gate) { steamLogin = true; steamProgress = 0; steamQr = ""; steamPrompt = ""; revision++; }
             var local = await steam!.Download(Path.Combine(work, "steam-frame"), Log,
                 image => { lock (gate) { steamQr = image; revision++; } },
@@ -237,7 +237,7 @@ public class ManagerBackend
             Stage(1, "Backing up the headset installation and plugins");
             var paths = await adb.PackagePaths(serial, token);
             string pulled = Path.Combine(work, "original"); Directory.CreateDirectory(pulled);
-            if (paths.Count == 0) Log("Gorilla Tag is not installed; continuing without an APK backup.");
+            if (paths.Count == 0) Log("Gorilla Tag is not installed");
             restoreSet = [];
             for (int i = 0; i < paths.Count; ++i)
             {
@@ -258,7 +258,6 @@ public class ManagerBackend
             token.ThrowIfCancellationRequested(); Stage(5, "Installing the patched Steam Frame build...");
             if (restoreSet.Count > 0)
             {
-                // Observe cancellation after uninstall so recovery can restore the package.
                 await adb.Run(serial, ["uninstall", AppPaths.OriginalPackage], CancellationToken.None, Log);
                 officialAppRemoved = true;
                 token.ThrowIfCancellationRequested();

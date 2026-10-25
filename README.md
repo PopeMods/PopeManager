@@ -1,5 +1,3 @@
-# PopeManager
-
 ﻿<div align="center">
 
 <img src="logo.png" width="150" height="150" alt="popemanager Logo" />
